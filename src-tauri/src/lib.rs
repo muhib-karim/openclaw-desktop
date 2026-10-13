@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn read_token_from_file_returns_none_for_missing_file() {
         let path = Path::new("/nonexistent/openclaw-desktop/openclaw.json");
-        assert_eq!(read_token_from_file(&path), None);
+        assert_eq!(read_token_from_file(path), None);
     }
 
     #[test]
