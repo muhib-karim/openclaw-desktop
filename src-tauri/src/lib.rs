@@ -4,7 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::net::TcpStream;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -34,7 +34,7 @@ fn openclaw_home_dir() -> Result<PathBuf, String> {
     let openclaw_dir = home.join(".openclaw");
     if !openclaw_dir.exists() {
         fs::create_dir_all(&openclaw_dir)
-            .map_err(|e| format!("Failed to create OpenClaw directory: {}", e))?;
+            .map_err(|e| format!("Failed to create OpenClaw directory: {e}"))?;
     }
     Ok(openclaw_dir)
 }
@@ -72,14 +72,14 @@ fn run_openclaw_gateway_control(action: &str) -> Result<String, String> {
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if stdout.is_empty() {
-            Ok(format!("Gateway {} command sent", action))
+            Ok(format!("Gateway {action} command sent"))
         } else {
             Ok(stdout)
         }
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         if stderr.is_empty() {
-            Err(format!("openclaw gateway {} failed", action))
+            Err(format!("openclaw gateway {action} failed"))
         } else {
             Err(stderr)
         }
@@ -94,14 +94,14 @@ fn start_gateway_foreground_to_logs() -> Result<(), String> {
         .write(true)
         .truncate(true)
         .open(&log_path)
-        .map_err(|e| format!("Failed to open gateway log file: {}", e))?;
+        .map_err(|e| format!("Failed to open gateway log file: {e}"))?;
 
     let stderr_file = OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true)
         .open(&error_log_path)
-        .map_err(|e| format!("Failed to open gateway error log file: {}", e))?;
+        .map_err(|e| format!("Failed to open gateway error log file: {e}"))?;
 
     let mut command = openclaw_command();
     command
@@ -116,7 +116,7 @@ fn start_gateway_foreground_to_logs() -> Result<(), String> {
 
     command
         .spawn()
-        .map_err(|e| format!("Failed to start gateway: {}", e))?;
+        .map_err(|e| format!("Failed to start gateway: {e}"))?;
 
     Ok(())
 }
@@ -152,9 +152,14 @@ fn read_gateway_token() -> Option<String> {
     read_token_from_file(&config_path)
 }
 
-fn read_token_from_file(path: &PathBuf) -> Option<String> {
+fn read_token_from_file(path: &Path) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
-    let json: Value = serde_json::from_str(&content).ok()?;
+    parse_gateway_token(&content)
+}
+
+/// Extract `gateway.auth.token` from the contents of an OpenClaw config file
+fn parse_gateway_token(content: &str) -> Option<String> {
+    let json: Value = serde_json::from_str(content).ok()?;
     json.get("gateway")
         .and_then(|g| g.get("auth"))
         .and_then(|a| a.get("token"))
@@ -169,9 +174,28 @@ pub struct GatewayStatus {
     pub dashboard_url: String,
 }
 
+fn dashboard_base_url() -> String {
+    format!("http://127.0.0.1:{GATEWAY_PORT}/")
+}
+
+/// Append the gateway auth token (URL-encoded) to the dashboard URL when available
+fn build_dashboard_url(base_url: &str, token: Option<&str>) -> String {
+    match token {
+        Some(token) => format!("{}?token={}", base_url, urlencoding::encode(token)),
+        None => base_url.to_string(),
+    }
+}
+
+/// Return the last `max_lines` lines of `content`
+fn tail_lines(content: &str, max_lines: usize) -> String {
+    let log_lines: Vec<&str> = content.lines().collect();
+    let start = log_lines.len().saturating_sub(max_lines);
+    log_lines[start..].join("\n")
+}
+
 /// Check if the OpenClaw gateway is running by probing the port
 fn is_gateway_running() -> bool {
-    TcpStream::connect(format!("127.0.0.1:{}", GATEWAY_PORT)).is_ok()
+    TcpStream::connect(format!("127.0.0.1:{GATEWAY_PORT}")).is_ok()
 }
 
 /// Get the current gateway status
@@ -180,7 +204,7 @@ fn get_gateway_status() -> GatewayStatus {
     GatewayStatus {
         running: is_gateway_running(),
         port: GATEWAY_PORT,
-        dashboard_url: format!("http://127.0.0.1:{}/", GATEWAY_PORT),
+        dashboard_url: dashboard_base_url(),
     }
 }
 
@@ -248,7 +272,7 @@ fn get_gateway_diagnostics() -> Result<GatewayDiagnostics, String> {
         openclaw_installed: is_openclaw_installed(),
         gateway_running: is_gateway_running(),
         gateway_port: GATEWAY_PORT,
-        dashboard_url: format!("http://127.0.0.1:{}/", GATEWAY_PORT),
+        dashboard_url: dashboard_base_url(),
         openclaw_version: detect_openclaw_version(),
         profile_name: std::env::var("OPENCLAW_PROFILE").ok(),
         log_path: log_path.display().to_string(),
@@ -288,7 +312,7 @@ async fn install_openclaw() -> Result<String, String> {
     let output = Command::new("npm")
         .args(["install", "-g", "openclaw"])
         .output()
-        .map_err(|e| format!("Failed to install: {}", e))?;
+        .map_err(|e| format!("Failed to install: {e}"))?;
 
     if output.status.success() {
         Ok("OpenClaw installed successfully".to_string())
@@ -300,11 +324,7 @@ async fn install_openclaw() -> Result<String, String> {
 /// Get the dashboard URL with auth token for iframe embedding
 #[tauri::command]
 fn get_dashboard_url() -> String {
-    let base_url = format!("http://127.0.0.1:{}/", GATEWAY_PORT);
-    match read_gateway_token() {
-        Some(token) => format!("{}?token={}", base_url, urlencoding::encode(&token)),
-        None => base_url,
-    }
+    build_dashboard_url(&dashboard_base_url(), read_gateway_token().as_deref())
 }
 
 /// Navigate main window to the dashboard
@@ -313,14 +333,14 @@ async fn open_dashboard_window(app: tauri::AppHandle) -> Result<(), String> {
     // Get the main window and navigate it to the dashboard
     if let Some(window) = app.get_webview_window("main") {
         // Build tokenized URL for authentication
-        let base_url = format!("http://127.0.0.1:{}/", GATEWAY_PORT);
-        let dashboard_url = match read_gateway_token() {
-            Some(token) => format!("{}?token={}", base_url, urlencoding::encode(&token)),
-            None => base_url,
-        };
+        let dashboard_url =
+            build_dashboard_url(&dashboard_base_url(), read_gateway_token().as_deref());
+        let url = dashboard_url
+            .parse::<tauri::Url>()
+            .map_err(|e| format!("Invalid dashboard URL: {e}"))?;
         window
-            .navigate(dashboard_url.parse().unwrap())
-            .map_err(|e| format!("Failed to navigate: {}", e))?;
+            .navigate(url)
+            .map_err(|e| format!("Failed to navigate: {e}"))?;
     }
     Ok(())
 }
@@ -336,17 +356,9 @@ fn get_gateway_logs(lines: Option<usize>) -> Result<String, String> {
     }
 
     let content =
-        fs::read_to_string(&log_path).map_err(|e| format!("Failed to read log file: {}", e))?;
+        fs::read_to_string(&log_path).map_err(|e| format!("Failed to read log file: {e}"))?;
 
-    let max_lines = lines.unwrap_or(100);
-    let log_lines: Vec<&str> = content.lines().collect();
-    let start = if log_lines.len() > max_lines {
-        log_lines.len() - max_lines
-    } else {
-        0
-    };
-
-    Ok(log_lines[start..].join("\n"))
+    Ok(tail_lines(&content, lines.unwrap_or(100)))
 }
 
 /// Clear the gateway logs
@@ -356,7 +368,7 @@ fn clear_gateway_logs() -> Result<(), String> {
     let log_path = home.join(".openclaw").join("gateway.log");
 
     if log_path.exists() {
-        fs::write(&log_path, "").map_err(|e| format!("Failed to clear logs: {}", e))?;
+        fs::write(&log_path, "").map_err(|e| format!("Failed to clear logs: {e}"))?;
     }
 
     Ok(())
@@ -470,4 +482,74 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_gateway_token_reads_nested_token() {
+        let config = r#"{"gateway": {"auth": {"token": "abc123"}}}"#;
+        assert_eq!(parse_gateway_token(config), Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn parse_gateway_token_handles_missing_or_invalid_data() {
+        assert_eq!(parse_gateway_token(r#"{"gateway": {}}"#), None);
+        assert_eq!(
+            parse_gateway_token(r#"{"gateway": {"auth": {"token": 42}}}"#),
+            None
+        );
+        assert_eq!(parse_gateway_token("not json"), None);
+    }
+
+    #[test]
+    fn read_token_from_file_returns_none_for_missing_file() {
+        let path = Path::new("/nonexistent/openclaw-desktop/openclaw.json");
+        assert_eq!(read_token_from_file(&path), None);
+    }
+
+    #[test]
+    fn dashboard_base_url_uses_gateway_port() {
+        assert_eq!(dashboard_base_url(), "http://127.0.0.1:18789/");
+    }
+
+    #[test]
+    fn build_dashboard_url_without_token_is_base_url() {
+        assert_eq!(
+            build_dashboard_url("http://127.0.0.1:18789/", None),
+            "http://127.0.0.1:18789/"
+        );
+    }
+
+    #[test]
+    fn build_dashboard_url_encodes_token() {
+        assert_eq!(
+            build_dashboard_url("http://127.0.0.1:18789/", Some("a b&c")),
+            "http://127.0.0.1:18789/?token=a%20b%26c"
+        );
+    }
+
+    #[test]
+    fn dashboard_url_parses_as_tauri_url() {
+        let url = build_dashboard_url(&dashboard_base_url(), Some("t/k"));
+        assert!(url.parse::<tauri::Url>().is_ok());
+    }
+
+    #[test]
+    fn tail_lines_keeps_last_lines() {
+        assert_eq!(tail_lines("a\nb\nc\nd", 2), "c\nd");
+    }
+
+    #[test]
+    fn tail_lines_returns_everything_when_short() {
+        assert_eq!(tail_lines("a\nb", 10), "a\nb");
+        assert_eq!(tail_lines("", 5), "");
+    }
+
+    #[test]
+    fn tail_lines_with_zero_limit_is_empty() {
+        assert_eq!(tail_lines("a\nb", 0), "");
+    }
 }

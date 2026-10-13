@@ -9,7 +9,7 @@ Guidance for coding agents working in `OpenClaw-Desktop`.
 - Tauri/Rust source: `src-tauri/src/`.
 - Main Rust commands exposed to frontend via `#[tauri::command]` in `src-tauri/src/lib.rs`.
 - Package manager in active use: `pnpm` (lockfile exists). `bun` is also mentioned in README.
-- CI build workflow: `.github/workflows/build.yml`.
+- CI workflows: `.github/workflows/ci.yml` (typecheck, Vitest, build, cargo fmt/clippy/test on push/PR) and `.github/workflows/build.yml` (tag-triggered release builds).
 
 ## Local Setup
 
@@ -52,12 +52,13 @@ If you add lint tooling (ESLint/Prettier/Biome), also add scripts in `package.js
 
 Current repository status:
 
-- Rust test harness is available.
-- No frontend JS/TS test runner is configured yet (no Vitest/Jest setup found).
+- Rust unit tests live in the `tests` module of `src-tauri/src/lib.rs`.
+- Frontend unit tests use Vitest (`src/**/*.test.ts`).
 
 ### Run all tests
 
-- Rust tests: `cargo test` (run in `src-tauri/`).
+- Frontend tests: `pnpm test`.
+- Rust tests: `cargo test` (run in `src-tauri/`; requires `pnpm build` first so `../dist` exists).
 
 ### Run a single test (important)
 
@@ -66,14 +67,11 @@ Current repository status:
 - Rust single integration test file: `cargo test --test file_name`.
 - With output: `cargo test test_name -- --nocapture`.
 
-### When frontend tests are introduced
+### Frontend tests (Vitest)
 
-- Add scripts like `test` and `test:watch` to `package.json`.
-- Prefer Vitest in this Vite codebase.
-- Single test file pattern (if Vitest is added):
-  - `pnpm exec vitest src/path/file.test.ts`
-- Single test name pattern (if Vitest is added):
-  - `pnpm exec vitest -t "test name"`
+- Watch mode: `pnpm test:watch`.
+- Single test file: `pnpm exec vitest run src/lib/gateway.test.ts`.
+- Single test name: `pnpm exec vitest run -t "test name"`.
 
 ## Coding Conventions
 

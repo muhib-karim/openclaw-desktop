@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  appendDoctorOutput,
+  describeOpenClawInstall,
+  gatewayStatusLabel,
+  getGatewayState,
+} from "./lib/gateway";
 import "./App.css";
 
 interface GatewayStatus {
@@ -130,10 +136,10 @@ function App() {
     setRunningDoctor(true);
     try {
       const output = await invoke<string>("run_openclaw_doctor");
-      setLogs((prev) => `${prev}\n\n===== openclaw doctor =====\n${output}`.trim());
+      setLogs((prev) => appendDoctorOutput(prev, output, false));
     } catch (e) {
       console.error("OpenClaw doctor failed:", e);
-      setLogs((prev) => `${prev}\n\n===== openclaw doctor (failed) =====\n${String(e)}`.trim());
+      setLogs((prev) => appendDoctorOutput(prev, String(e), true));
     } finally {
       setRunningDoctor(false);
       fetchDiagnostics();
@@ -150,7 +156,9 @@ function App() {
       try {
         await invoke<boolean>("auto_start_gateway");
         setStartingGateway(true);
-      } catch (_) { /* ignore */ }
+      } catch (e) {
+        console.error("Auto-start after install failed:", e);
+      }
     } catch (e) {
       setError(String(e));
     } finally {
@@ -187,6 +195,8 @@ function App() {
   async function openKofi() {
     await openUrl("https://ko-fi.com/ai_dev_2024");
   }
+
+  const gatewayState = getGatewayState(status?.running, startingGateway);
 
   // Loading screen
   if (page === "loading") {
@@ -256,8 +266,8 @@ function App() {
         </div>
 
         <div className="status-center">
-          <span className={`status-indicator ${status?.running ? "running" : startingGateway ? "starting" : "stopped"}`}>
-            {status?.running ? "🟢 Gateway Running" : startingGateway ? "🟡 Starting..." : "🔴 Gateway Stopped"}
+          <span className={`status-indicator ${gatewayState}`}>
+            {gatewayStatusLabel(gatewayState)}
           </span>
         </div>
 
@@ -349,7 +359,7 @@ function App() {
           </div>
           {diagnostics && (
             <div className="diagnostics-row">
-              <span>OpenClaw: {diagnostics.openclaw_installed ? (diagnostics.openclaw_version || "Installed") : "Not installed"}</span>
+              <span>OpenClaw: {describeOpenClawInstall(diagnostics.openclaw_installed, diagnostics.openclaw_version)}</span>
               <span>Gateway: {diagnostics.gateway_running ? "Running" : "Stopped"}</span>
               <span>Port: {diagnostics.gateway_port}</span>
             </div>

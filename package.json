@@ -3,32 +3,35 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "A beautiful desktop application for OpenClaw AI assistant",
-  "author": "ai-dev-2024",
+  "description": "Cross-platform Tauri desktop app for managing a local OpenClaw AI assistant gateway",
+  "author": "Muhib Al Karim",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ai-dev-2024/openclaw-desktop"
+    "url": "https://github.com/muhib-karim/openclaw-desktop"
   },
-  "homepage": "https://github.com/ai-dev-2024/openclaw-desktop",
+  "homepage": "https://github.com/muhib-karim/openclaw-desktop",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "dependencies": {
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
     "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-opener": "^2"
+    "@tauri-apps/plugin-opener": "^2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
-    "@tauri-apps/cli": "^2"
+    "vitest": "^3.2.7"
   }
 }

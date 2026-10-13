@@ -2,7 +2,7 @@
 name = "openclaw-desktop"
 version = "0.2.0"
 description = "OpenClaw Desktop - A GUI for OpenClaw AI Assistant"
-authors = ["ai-dev-2024"]
+authors = ["Muhib Al Karim"]
 edition = "2021"
 
 [lib]
