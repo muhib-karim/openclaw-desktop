@@ -24,8 +24,12 @@ gives it a windowed UI and a system-tray icon: it checks whether OpenClaw is ins
 gateway, shows its status and logs, and then opens the gateway's own dashboard inside the app
 window.
 
-The app doesn't reimplement OpenClaw. It runs the `openclaw` CLI and talks to the gateway on
-`127.0.0.1:18789`.
+## Why it matters
+
+Running OpenClaw normally means keeping a terminal open, remembering CLI commands and finding the
+dashboard URL and token yourself. The app turns that into one window: install, start, check status,
+read logs and open the dashboard without leaving it. It doesn't reimplement OpenClaw; it runs the
+`openclaw` CLI and talks to the gateway on `127.0.0.1:18789`.
 
 ## Key features
 
@@ -45,10 +49,6 @@ All of these are implemented in [`src-tauri/src/lib.rs`](src-tauri/src/lib.rs) a
 | **System tray** | Closing the window hides it to the tray. The tray menu has Start, Stop, Open and Quit |
 | **Single instance** | Launching the app a second time focuses the existing window instead of opening another |
 
-## Screenshots
-
-There are no screenshots in the repository yet.
-
 ## Install
 
 Pre-built installers are published on the
@@ -57,8 +57,8 @@ them for Windows (`.msi` / `.exe`), macOS (`.dmg`, Intel and Apple Silicon) and 
 `.deb`, `.rpm`). Not every release has every platform; for example, the v0.1.0 release has no
 Windows assets attached.
 
-**Runtime requirement:** to install the `openclaw` CLI, you need either OpenClaw itself or Node.js +
-npm so the setup wizard can install it.
+**Runtime requirement:** the `openclaw` CLI must already be installed, or Node.js + npm must be
+available so the setup wizard can install it.
 
 ## Quick start (from source)
 
@@ -159,7 +159,8 @@ openclaw-desktop/
 ## Compatibility
 
 The app talks to the OpenClaw gateway over HTTP on port `18789`. It should work with any OpenClaw
-version whose CLI provides `gateway`, `daemon` and `doctor`. Earlier releases list these versions:
+version whose CLI provides `gateway`, `daemon` and `doctor`. Previously documented pairings (not
+re-tested against current OpenClaw releases):
 
 | OpenClaw version | Desktop app version |
 |------------------|---------------------|
