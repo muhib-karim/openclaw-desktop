@@ -176,6 +176,16 @@ re-tested against current OpenClaw releases):
 - The gateway port is fixed at `18789`.
 - Ideas: a configurable port, a live tray status, and screenshots in this README.
 
+## Tech stack
+
+- **Language:** Rust
+- **Frameworks and tools:** React, Tauri, Vite, TypeScript, Vitest, Rust (Cargo)
+- **CI:** GitHub Actions
+
+## Contributing
+
+Issues and pull requests are welcome. Before opening a pull request, run `npm test` and `cargo test`. Please keep each pull request focused and say how you tested it.
+
 ## Support
 
 If you find this project useful, you can support development on
