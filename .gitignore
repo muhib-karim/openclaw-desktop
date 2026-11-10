@@ -26,3 +26,9 @@ src-tauri/target_agent/
 *.njsproj
 *.sln
 *.sw?
+
+# pnpm is the only supported package manager (see pnpm-lock.yaml)
+package-lock.json
+yarn.lock
+bun.lock
+bun.lockb
