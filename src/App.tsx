@@ -1,11 +1,13 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
-  appendDoctorOutput,
+  composeLogView,
   describeOpenClawInstall,
   gatewayStatusLabel,
   getGatewayState,
+  hasStartTimedOut,
+  toErrorMessage,
+  type DoctorOutput,
 } from "./lib/gateway";
 import "./App.css";
 
@@ -26,7 +28,23 @@ interface GatewayDiagnostics {
   error_log_path: string;
 }
 
-type Page = "loading" | "setup" | "dashboard";
+type Page = "loading" | "setup" | "dashboard" | "error";
+
+const STATUS_POLL_MS = 3000;
+const LOG_POLL_MS = 1000;
+const START_TIMEOUT_MS = 30_000;
+const START_TIMEOUT_MESSAGE =
+  "The gateway did not start listening on port 18789 within 30 seconds. Open Logs to see why.";
+
+/** Diagnostics are best-effort: a failure hides the row instead of breaking the log panel. */
+async function loadDiagnostics(): Promise<GatewayDiagnostics | null> {
+  try {
+    return await invoke<GatewayDiagnostics>("get_gateway_diagnostics");
+  } catch (e) {
+    console.error("Failed to fetch diagnostics:", e);
+    return null;
+  }
+}
 
 function App() {
   const [page, setPage] = useState<Page>("loading");
@@ -36,18 +54,48 @@ function App() {
   const [startingGateway, setStartingGateway] = useState(false);
   const [navigatedToDashboard, setNavigatedToDashboard] = useState(false);
 
+  // When the pending start was requested; lets the status poll give up on a start that never lands
+  const startRequestedAt = useRef<number | null>(null);
+  // True from the moment a dashboard navigation is requested, so overlapping polls cannot repeat it
+  const navigating = useRef(false);
+
   // Log panel state
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<string>("");
+  const [doctorOutput, setDoctorOutput] = useState<DoctorOutput | null>(null);
   const [diagnostics, setDiagnostics] = useState<GatewayDiagnostics | null>(null);
   const [runningDoctor, setRunningDoctor] = useState(false);
 
-  // Auto-start gateway on first load
+  const markStarting = useCallback(() => {
+    startRequestedAt.current = Date.now();
+    setStartingGateway(true);
+  }, []);
+
+  const clearStarting = useCallback(() => {
+    startRequestedAt.current = null;
+    setStartingGateway(false);
+  }, []);
+
+  // Bumped by "Try again" to re-run the install check
+  const [initAttempt, setInitAttempt] = useState(0);
+
+  // Check the installation, then auto-start the gateway
   useEffect(() => {
+    let cancelled = false;
+
     async function init() {
-      const isInstalled = await invoke<boolean>("is_openclaw_installed");
-      if (!isInstalled) {
-        setPage("setup");
+      try {
+        const isInstalled = await invoke<boolean>("is_openclaw_installed");
+        if (cancelled) return;
+        if (!isInstalled) {
+          setPage("setup");
+          return;
+        }
+      } catch (e) {
+        console.error("Install check failed:", e);
+        if (cancelled) return;
+        setError(toErrorMessage(e));
+        setPage("error");
         return;
       }
 
@@ -56,79 +104,119 @@ function App() {
       // Auto-start if not running
       try {
         const started = await invoke<boolean>("auto_start_gateway");
-        if (started) {
-          setStartingGateway(true);
+        if (!cancelled && started) {
+          markStarting();
         }
       } catch (e) {
         console.error("Auto-start failed:", e);
+        if (!cancelled) {
+          setError(`Could not start the gateway: ${toErrorMessage(e)}`);
+        }
       }
     }
-    init();
-  }, []);
+
+    void init();
+    return () => {
+      cancelled = true;
+    };
+  }, [initAttempt, markStarting]);
 
   // Poll status every 3 seconds
   useEffect(() => {
     if (page !== "dashboard") return;
 
+    let cancelled = false;
+    let inFlight = false;
+
     async function checkStatus() {
+      // A slow backend must not stack up overlapping checks
+      if (inFlight) return;
+      inFlight = true;
       try {
         const gatewayStatus = await invoke<GatewayStatus>("get_gateway_status");
+        if (cancelled) return;
         setStatus(gatewayStatus);
 
-        if (gatewayStatus.running) {
-          setStartingGateway(false);
-
-          // Navigate the entire webview to the dashboard (bypasses X-Frame-Options)
-          if (!navigatedToDashboard) {
-            setNavigatedToDashboard(true);
-            try {
-              await invoke("open_dashboard_window");
-            } catch (e) {
-              console.error("Failed to navigate to dashboard:", e);
-            }
+        if (!gatewayStatus.running) {
+          // Gateway is down: allow a fresh navigation when it comes back
+          navigating.current = false;
+          setNavigatedToDashboard(false);
+          if (hasStartTimedOut(startRequestedAt.current, Date.now(), START_TIMEOUT_MS)) {
+            clearStarting();
+            setError(START_TIMEOUT_MESSAGE);
           }
-        } else {
-          // Gateway stopped — reset so we re-navigate when it comes back
-          if (navigatedToDashboard) {
+          return;
+        }
+
+        clearStarting();
+        if (navigating.current) return;
+
+        // Navigate the entire webview to the dashboard (bypasses X-Frame-Options)
+        navigating.current = true;
+        setNavigatedToDashboard(true);
+        try {
+          await invoke("open_dashboard_window");
+        } catch (e) {
+          console.error("Failed to navigate to dashboard:", e);
+          // Let the next poll retry instead of leaving a blank page
+          navigating.current = false;
+          if (!cancelled) {
             setNavigatedToDashboard(false);
+            setError(`Could not open the dashboard: ${toErrorMessage(e)}`);
           }
         }
       } catch (e) {
         console.error("Status check failed:", e);
+        if (!cancelled) {
+          setError(`Could not read the gateway status: ${toErrorMessage(e)}`);
+        }
+      } finally {
+        inFlight = false;
       }
     }
 
-    checkStatus();
-    const interval = setInterval(checkStatus, 3000);
-    return () => clearInterval(interval);
-  }, [page, navigatedToDashboard]);
+    void checkStatus();
+    const interval = setInterval(() => void checkStatus(), STATUS_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [page, clearStarting]);
 
   // Poll logs when panel is open
   useEffect(() => {
     if (!showLogs) return;
 
+    let cancelled = false;
+    let inFlight = false;
+
     async function fetchLogs() {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const logContent = await invoke<string>("get_gateway_logs", { lines: 200 });
-        setLogs(logContent);
+        if (!cancelled) setLogs(logContent);
       } catch (e) {
         console.error("Failed to fetch logs:", e);
+        if (!cancelled) setLogs(`Could not read the gateway log: ${toErrorMessage(e)}`);
+      } finally {
+        inFlight = false;
       }
     }
 
-    fetchLogs();
-    fetchDiagnostics();
-    const interval = setInterval(fetchLogs, 1000);
-    return () => clearInterval(interval);
+    void fetchLogs();
+    void loadDiagnostics().then((data) => {
+      if (!cancelled) setDiagnostics(data);
+    });
+    const interval = setInterval(() => void fetchLogs(), LOG_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [showLogs]);
 
-  async function fetchDiagnostics() {
-    try {
-      const data = await invoke<GatewayDiagnostics>("get_gateway_diagnostics");
-      setDiagnostics(data);
-    } catch (e) {
-      console.error("Failed to fetch diagnostics:", e);
-    }
+  async function refreshDiagnostics() {
+    setDiagnostics(await loadDiagnostics());
   }
 
   async function runDoctor() {
@@ -136,14 +224,21 @@ function App() {
     setRunningDoctor(true);
     try {
       const output = await invoke<string>("run_openclaw_doctor");
-      setLogs((prev) => appendDoctorOutput(prev, output, false));
+      // Kept apart from `logs`, which the log poll replaces every second
+      setDoctorOutput({ text: output, failed: false });
     } catch (e) {
       console.error("OpenClaw doctor failed:", e);
-      setLogs((prev) => appendDoctorOutput(prev, String(e), true));
+      setDoctorOutput({ text: toErrorMessage(e), failed: true });
     } finally {
       setRunningDoctor(false);
-      fetchDiagnostics();
+      void refreshDiagnostics();
     }
+  }
+
+  function handleRetry() {
+    setError(null);
+    setPage("loading");
+    setInitAttempt((attempt) => attempt + 1);
   }
 
   async function handleInstall() {
@@ -151,49 +246,59 @@ function App() {
     setError(null);
     try {
       await invoke("install_openclaw");
-      setPage("dashboard");
-      // Auto-start after install
-      try {
-        await invoke<boolean>("auto_start_gateway");
-        setStartingGateway(true);
-      } catch (e) {
-        console.error("Auto-start after install failed:", e);
-      }
     } catch (e) {
-      setError(String(e));
-    } finally {
+      console.error("Install failed:", e);
+      setError(toErrorMessage(e));
       setInstalling(false);
+      return;
+    }
+
+    setInstalling(false);
+    setPage("dashboard");
+    // Auto-start after install
+    try {
+      await invoke<boolean>("auto_start_gateway");
+      markStarting();
+    } catch (e) {
+      console.error("Auto-start after install failed:", e);
+      setError(`OpenClaw was installed, but the gateway could not be started: ${toErrorMessage(e)}`);
     }
   }
 
   async function handleStartGateway() {
     if (startingGateway) return;
-    setStartingGateway(true);
+    setError(null);
+    markStarting();
     try {
       await invoke("start_gateway");
     } catch (e) {
       console.error("Failed to start gateway:", e);
-      setStartingGateway(false);
+      clearStarting();
+      setError(`Could not start the gateway: ${toErrorMessage(e)}`);
     }
   }
 
   async function handleRestartGateway() {
+    setError(null);
     try {
       await invoke("restart_gateway");
+      navigating.current = false;
       setNavigatedToDashboard(false);
-      setStartingGateway(true);
+      markStarting();
     } catch (e) {
       console.error("Failed to restart gateway:", e);
+      setError(`Could not restart the gateway: ${toErrorMessage(e)}`);
     }
   }
 
   async function openInBrowser() {
-    const url = await invoke<string>("get_dashboard_url");
-    await openUrl(url);
-  }
-
-  async function openKofi() {
-    await openUrl("https://ko-fi.com/ai_dev_2024");
+    try {
+      // The backend builds the tokenized URL and opens it, so the token never reaches this page
+      await invoke("open_dashboard_in_browser");
+    } catch (e) {
+      console.error("Failed to open the dashboard in a browser:", e);
+      setError(`Could not open the dashboard in your browser: ${toErrorMessage(e)}`);
+    }
   }
 
   const gatewayState = getGatewayState(status?.running, startingGateway);
@@ -207,6 +312,24 @@ function App() {
         </div>
         <h1>OpenClaw Desktop</h1>
         <p className="loading-text">Checking installation...</p>
+      </main>
+    );
+  }
+
+  // The install check itself failed
+  if (page === "error") {
+    return (
+      <main className="container loading">
+        <div className="logo-container">
+          <span className="logo-emoji">🦞</span>
+        </div>
+        <h1>OpenClaw Desktop</h1>
+        <p className="error" role="alert">
+          Could not check the OpenClaw installation: {error ?? "Unknown error"}
+        </p>
+        <button className="primary-btn" onClick={handleRetry}>
+          Try again
+        </button>
       </main>
     );
   }
@@ -230,7 +353,11 @@ function App() {
             <li>Get you ready to use your AI assistant</li>
           </ul>
 
-          {error && <p className="error">{error}</p>}
+          {error && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
 
           <button
             className="primary-btn"
@@ -242,10 +369,7 @@ function App() {
         </div>
 
         <footer className="setup-footer">
-          <button className="support-btn" onClick={openKofi}>
-            ☕ Support Development
-          </button>
-          <p className="credits">Made with ❤️ by ai-dev-2024</p>
+          <p className="credits">Made with ❤️ by Muhib Karim</p>
         </footer>
       </main>
     );
@@ -301,11 +425,17 @@ function App() {
           >
             📋 {showLogs ? "Hide Logs" : "Logs"}
           </button>
-          <button className="support-btn-small" onClick={openKofi} title="Support on Ko-fi">
-            ☕
-          </button>
         </div>
       </header>
+
+      {error && (
+        <div className="error-banner" role="alert">
+          <span>{error}</span>
+          <button className="error-dismiss" onClick={() => setError(null)} title="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Gateway Offline / Starting view */}
       {!status?.running && (
@@ -318,13 +448,6 @@ function App() {
               ▶ Start Gateway
             </button>
           )}
-
-          <div className="support-section">
-            <p>Enjoying OpenClaw Desktop?</p>
-            <button className="support-btn" onClick={openKofi}>
-              ☕ Buy me a coffee on Ko-fi
-            </button>
-          </div>
         </div>
       )}
 
@@ -342,7 +465,7 @@ function App() {
           <div className="log-header">
             <span>📋 Gateway Logs</span>
             <div className="log-actions">
-              <button className="log-tool-btn" onClick={fetchDiagnostics} title="Refresh diagnostics">
+              <button className="log-tool-btn" onClick={refreshDiagnostics} title="Refresh diagnostics">
                 Refresh
               </button>
               <button className="log-tool-btn" onClick={runDoctor} disabled={runningDoctor} title="Run openclaw doctor">
@@ -364,7 +487,7 @@ function App() {
               <span>Port: {diagnostics.gateway_port}</span>
             </div>
           )}
-          <pre className="log-content">{logs || "No logs available yet..."}</pre>
+          <pre className="log-content">{composeLogView(logs, doctorOutput) || "No logs available yet..."}</pre>
         </div>
       )}
     </main>

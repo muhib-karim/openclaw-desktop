@@ -8,12 +8,12 @@ Guidance for coding agents working in `OpenClaw-Desktop`.
 - Frontend source: `src/`.
 - Tauri/Rust source: `src-tauri/src/`.
 - Main Rust commands exposed to frontend via `#[tauri::command]` in `src-tauri/src/lib.rs`.
-- Package manager in active use: `pnpm` (lockfile exists). `bun` is also mentioned in README.
-- CI workflows: `.github/workflows/ci.yml` (typecheck, Vitest, build, cargo fmt/clippy/test on push/PR) and `.github/workflows/build.yml` (tag-triggered release builds).
+- Package manager: `pnpm` only. The version is pinned by `packageManager` in `package.json` and `pnpm-lock.yaml` is the only lockfile; do not add lockfiles for other managers.
+- CI workflows: `.github/workflows/ci.yml` (ESLint, typecheck, Vitest, build, audit; cargo fmt/clippy/test on Linux and Windows; gitleaks) and `.github/workflows/build.yml` (tag-triggered release builds). Actions are pinned to commit SHAs; keep them pinned when editing.
 
 ## Local Setup
 
-- Node.js 18+ (CI uses Node 20).
+- Node.js 22 LTS (22.22 or newer; CI uses Node 22).
 - Rust stable toolchain.
 - `pnpm` installed globally.
 - Install deps: `pnpm install`.
@@ -39,21 +39,20 @@ Guidance for coding agents working in `OpenClaw-Desktop`.
 
 ## Lint / Typecheck / Quality Commands
 
-There is no dedicated `lint` script in `package.json` currently.
-
+- ESLint (flat config in `eslint.config.js`, type-checked rules + React hooks): `pnpm lint`.
 - Preferred TS correctness gate: `pnpm exec tsc --noEmit`.
 - Equivalent full frontend gate (includes bundling): `pnpm build`.
 - Rust formatting check: `cargo fmt --all -- --check` (run in `src-tauri/`).
 - Rust lint: `cargo clippy --all-targets --all-features -- -D warnings` (run in `src-tauri/`).
 
-If you add lint tooling (ESLint/Prettier/Biome), also add scripts in `package.json` and update this file.
+If you add more lint or format tooling (Prettier/Biome), also add scripts in `package.json` and update this file.
 
 ## Test Commands
 
 Current repository status:
 
 - Rust unit tests live in the `tests` module of `src-tauri/src/lib.rs`.
-- Frontend unit tests use Vitest (`src/**/*.test.ts`).
+- Frontend tests use Vitest: unit tests in `src/**/*.test.ts`, component tests in `src/**/*.test.tsx` (jsdom + Testing Library, with `@tauri-apps/api/core` mocked).
 
 ### Run all tests
 
@@ -98,6 +97,9 @@ Follow existing code style before introducing new patterns.
 ### Rust (Tauri backend)
 
 - Keep Tauri commands small and focused.
+- Commands that spawn a process or touch a socket or file must be `async` and go through `run_blocking`; sync commands run on the main thread and freeze the UI.
+- Spawn processes through `hidden_command` / `shim_command` so Windows gets `CREATE_NO_WINDOW` and `.cmd` shims resolve.
+- Rust cannot always be compiled where you work: extract pure functions and cover them with `#[test]`s so CI checks the logic.
 - Return `Result<_, String>` for command errors exposed to frontend.
 - Convert IO/process errors with contextual messages via `map_err`.
 - Prefer early returns for guard conditions.
@@ -131,7 +133,7 @@ Follow existing code style before introducing new patterns.
 - Update docs when changing commands, scripts, or development flow.
 - If adding new commands, ensure frontend and Rust sides stay aligned.
 - Run relevant checks before finishing:
-  - Frontend changes: `pnpm build` (or at least `pnpm exec tsc --noEmit`).
+  - Frontend changes: `pnpm lint`, `pnpm test` and `pnpm build` (or at least `pnpm exec tsc --noEmit`).
   - Rust changes: `cargo test` and ideally `cargo clippy` in `src-tauri/`.
 
 ## Repository-Specific Notes
@@ -142,7 +144,8 @@ Follow existing code style before introducing new patterns.
   - frontend dist output: `../dist`
 - Vite dev server is expected on port `1420` (`vite.config.ts`).
 - Gateway integration targets `127.0.0.1:18789`.
-- CI builds on Windows, macOS (Intel + Apple Silicon), and Linux.
+- Release builds run on Windows, macOS (Intel + Apple Silicon), and Linux. PR checks compile Rust on Linux and Windows only.
+- Keep `@tauri-apps/*` npm packages and the `tauri*` crates on the same minor version; bump both together.
 
 ## Cursor / Copilot Rules
 

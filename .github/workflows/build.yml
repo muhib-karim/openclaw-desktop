@@ -7,10 +7,16 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
+    permissions:
+      contents: write # create the draft release and upload the installers
     strategy:
       fail-fast: false
       matrix:
@@ -30,24 +36,40 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     name: Build ${{ matrix.name }}
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      # The pnpm version comes from the packageManager field in package.json
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
+          cache: pnpm
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v3
-        with:
-          version: 10
+      # tauri-action names the release after the app version, so a mismatched tag would
+      # silently publish under the wrong version
+      - name: Check the tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match app version ${version} in src-tauri/tauri.conf.json"
+            exit 1
+          fi
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Install Linux dependencies
@@ -57,10 +79,10 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Install frontend dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -68,24 +90,13 @@ jobs:
           releaseName: 'OpenClaw Desktop v__VERSION__'
           releaseBody: |
             ## OpenClaw Desktop v__VERSION__
-            
+
             A beautiful desktop interface for OpenClaw AI assistant.
-            
+
             ### Downloads
             - **Windows**: `.msi` or `.exe` installer
             - **macOS**: `.dmg` disk image
             - **Linux**: `.AppImage` or `.deb` package
-            
-            ---
-            
-            ☕ **[Support Development on Ko-fi](https://ko-fi.com/ai_dev_2024)**
           releaseDraft: true
           prerelease: false
           args: --target ${{ matrix.target }}
-
-  notify:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Build Complete
-        run: echo "All platforms built successfully!"
