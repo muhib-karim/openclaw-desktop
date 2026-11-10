@@ -165,38 +165,6 @@ body {
   margin-top: 0.5rem;
 }
 
-/* Support Button */
-.support-btn {
-  padding: 0.75rem 1.5rem;
-  background: linear-gradient(135deg, #ff5e5b, #ff8c00);
-  color: white;
-  border: none;
-  border-radius: 25px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.support-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 5px 20px rgba(255, 94, 91, 0.4);
-}
-
-.support-btn-small {
-  padding: 0.5rem 0.75rem;
-  background: linear-gradient(135deg, #ff5e5b, #ff8c00);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.2s ease;
-}
-
-.support-btn-small:hover {
-  transform: scale(1.1);
-}
-
 /* Dashboard View */
 .dashboard {
   height: 100vh;
@@ -380,13 +348,25 @@ body {
   font-size: 0.95rem;
 }
 
-.support-section {
-  margin-top: 3rem;
-  text-align: center;
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 1rem;
+  font-size: 0.9rem;
+  flex-shrink: 0;
 }
 
-.support-section p {
-  margin-bottom: 0.75rem;
+.error-dismiss {
+  background: none;
+  border: none;
+  color: var(--danger);
+  cursor: pointer;
+  font-size: 1rem;
 }
 
 /* Log Panel */

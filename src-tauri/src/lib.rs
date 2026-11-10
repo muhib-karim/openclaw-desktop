@@ -549,12 +549,6 @@ fn tokenized_dashboard_url() -> String {
     build_dashboard_url(&dashboard_base_url(), read_gateway_token().as_deref())
 }
 
-/// Get the dashboard URL with auth token
-#[tauri::command]
-fn get_dashboard_url() -> String {
-    tokenized_dashboard_url()
-}
-
 /// Open the dashboard in the default browser. The tokenized URL is built and opened here, so the
 /// token never has to be handed to the webview.
 #[tauri::command]
@@ -753,7 +747,6 @@ pub fn run() {
             stop_gateway,
             restart_gateway,
             auto_start_gateway,
-            get_dashboard_url,
             open_dashboard_in_browser,
             is_openclaw_installed,
             install_openclaw,
